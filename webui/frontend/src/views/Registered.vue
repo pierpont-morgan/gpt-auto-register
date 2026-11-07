@@ -6,6 +6,7 @@ import {
   listRegistered, getRegistered, deleteRegistered,
   bulkDeleteRegistered, bulkDeleteAccounts, checkPlus,
   listExportFormats, exportRegistered, updateCredentials,
+  startRefreshToken, getRefreshTokenStatus, stopRefreshToken,
 } from '@/api/register'
 import { copyText, fmtTime } from '@/api/request'
 import { useFormStore, proxyText } from '@/stores/form'
@@ -142,6 +143,86 @@ const exportLabel = ref('')
 //     那时再去读 selected/表格，删的就不是刚下载的那批了。
 const exportedEmails = ref([])
 const deletingExported = ref(false)
+
+// ──────────── Token 批量刷新与号池同步 ────────────
+const refreshDialogVisible = ref(false)
+const refreshStatus = ref({
+  is_running: false,
+  total: 0,
+  current: 0,
+  success_count: 0,
+  fail_count: 0,
+  current_email: '',
+  logs: []
+})
+let refreshTimer = null
+
+const refreshProgressPercent = computed(() => {
+  if (!refreshStatus.value.total) return 0
+  return Math.min(100, Math.round((refreshStatus.value.current / refreshStatus.value.total) * 100))
+})
+
+async function pollRefreshStatus() {
+  try {
+    const { data } = await getRefreshTokenStatus()
+    refreshStatus.value = data
+    if (data.is_running) {
+      if (!refreshTimer) {
+        refreshTimer = setInterval(pollRefreshStatus, 1500)
+      }
+    } else {
+      if (refreshTimer) {
+        clearInterval(refreshTimer)
+        refreshTimer = null
+      }
+      load()
+    }
+  } catch (e) {}
+}
+
+async function handleStartRefresh(onlyExpired = true, singleEmail = null) {
+  let emails = null
+  let label = '全部已过期账号'
+  if (singleEmail) {
+    emails = [singleEmail]
+    label = singleEmail
+  } else if (selected.value.length > 0) {
+    emails = selected.value.map(r => r.email)
+    label = `选中的 ${emails.length} 个账号`
+  }
+
+  const ok = await confirm(`确定开始为【${label}】刷新 Token 并同步至 ChatGPT2API 吗？`)
+  if (!ok) return
+
+  try {
+    await startRefreshToken({ emails, only_expired: onlyExpired })
+    ElMessage.success('刷新任务已启动')
+    refreshDialogVisible.value = true
+    pollRefreshStatus()
+  } catch (e) {
+    ElMessage.error(e.message || '启动刷新任务失败')
+  }
+}
+
+function handleRefreshDropdown(cmd) {
+  if (cmd === 'selected') {
+    handleStartRefresh(false)
+  } else if (cmd === 'all_expired') {
+    handleStartRefresh(true)
+  } else if (cmd === 'view') {
+    refreshDialogVisible.value = true
+    pollRefreshStatus()
+  }
+}
+
+async function handleStopRefresh() {
+  try {
+    await stopRefreshToken()
+    ElMessage.info('已请求终止任务')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
 
 const exportBtnText = computed(() =>
   selected.value.length ? `导出选中 (${selected.value.length})` : '导出全部',
@@ -392,6 +473,22 @@ onActivated(() => load())
           </template>
         </el-dropdown>
         <el-divider direction="vertical" />
+        <el-divider direction="vertical" />
+        <el-dropdown trigger="click" @command="handleRefreshDropdown">
+          <el-button type="success" :loading="refreshStatus.is_running">
+            <el-icon><Refresh /></el-icon>
+            {{ refreshStatus.is_running ? '刷新进行中 (' + refreshStatus.current + '/' + refreshStatus.total + ')' : (selected.length ? '刷新选中 Token (' + selected.length + ')' : '刷新 Token / 同步号池') }}
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-if="selected.length" command="selected">仅刷新选中的 {{ selected.length }} 个账号</el-dropdown-item>
+              <el-dropdown-item command="all_expired">扫描并刷新全部已过期账号</el-dropdown-item>
+              <el-dropdown-item divided command="view">查看当前刷新任务状态</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-divider direction="vertical" />
         <el-button type="danger" plain :disabled="!selected.length" @click="deleteSelected">
           删除选中 ({{ selected.length }})
         </el-button>
@@ -436,6 +533,13 @@ onActivated(() => load())
             <span v-else class="hint">—</span>
           </template>
         </el-table-column>
+        <el-table-column label="Token状态" width="130" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.token_status === 'valid'" size="small" type="success">有效 (余{{ row.token_expires_in_days }}天)</el-tag>
+            <el-tag v-else-if="row.token_status === 'expired'" size="small" type="danger">已过期</el-tag>
+            <el-tag v-else size="small" type="info">无凭证</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="Plus状态" width="120">
           <template #default="{ row }">
             <StatusDot v-if="plusOf(row)" :type="PLUS_TYPE[plusOf(row).status] || 'info'" :text="plusOf(row).label" />
@@ -471,6 +575,7 @@ onActivated(() => load())
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" text type="success" @click="handleStartRefresh(false, row.email)">刷新</el-button>
             <el-button size="small" text @click="viewCred(row.email)">查看凭证</el-button>
             <el-button size="small" text type="warning" @click="openEdit(row)">编辑</el-button>
             <el-button size="small" text type="danger" @click="deleteOne(row.email)">删除</el-button>
@@ -486,6 +591,34 @@ onActivated(() => load())
           layout="prev, pager, next, total" background
         />
       </div>
+
+      <!-- Token 刷新与同步进度弹窗 -->
+      <el-dialog v-model="refreshDialogVisible" title="Token 刷新与号池同步" width="680px" top="10vh" :close-on-click-modal="false">
+        <div style="margin-bottom: 16px">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
+            <span style="font-weight: 500">
+              进度：{{ refreshStatus.current }} / {{ refreshStatus.total }}
+              <span v-if="refreshStatus.current_email" class="hint" style="margin-left: 10px">当前正在处理: {{ refreshStatus.current_email }}</span>
+            </span>
+            <span>
+              <el-tag type="success" size="small" style="margin-right: 6px">成功: {{ refreshStatus.success_count }}</el-tag>
+              <el-tag type="danger" size="small">失败: {{ refreshStatus.fail_count }}</el-tag>
+            </span>
+          </div>
+          <el-progress :percentage="refreshProgressPercent" :status="refreshStatus.is_running ? undefined : (refreshStatus.fail_count > 0 ? 'warning' : 'success')" />
+        </div>
+        <div style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; height: 240px; overflow-y: auto; line-height: 1.6">
+          <div v-for="(log, i) in refreshStatus.logs" :key="i">{{ log }}</div>
+          <div v-if="!refreshStatus.logs.length" style="color: #6e6e6e">暂无运行日志...</div>
+        </div>
+        <template #footer>
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <el-button v-if="refreshStatus.is_running" type="danger" size="small" @click="handleStopRefresh">终止任务</el-button>
+            <span v-else></span>
+            <el-button @click="refreshDialogVisible = false">关闭窗口</el-button>
+          </div>
+        </template>
+      </el-dialog>
 
       <el-dialog v-model="exportVisible" width="720px" top="8vh">
         <template #header>

@@ -768,13 +768,14 @@ def list_registered(limit: int = 20, offset: int = 0, filter_rt: str = "all") ->
     con = _conn()
     where = _registered_where(filter_rt)
     cur = con.execute(
-        f"SELECT email, password, totp_secret, "
+        f"SELECT email, password, totp_secret, access_token, "
         f"length(access_token) AS at_len, length(session_token) AS st_len, "
         f"length(refresh_token) AS rt_len, extra_json, created_at FROM registered "
         f"{where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
         (limit, offset),
     )
     rows = []
+    now = time.time()
     for r in cur.fetchall():
         d = dict(r)
         plus = None
@@ -786,6 +787,28 @@ def list_registered(limit: int = 20, offset: int = 0, filter_rt: str = "all") ->
                 pass
         d["plus_check"] = plus
         d.pop("extra_json", None)
+        token = d.pop("access_token", "") or ""
+        token_exp = 0
+        if token and "." in token:
+            try:
+                parts = token.split(".")
+                if len(parts) >= 2:
+                    p = parts[1]
+                    pad = (4 - len(p) % 4) % 4
+                    payload = json.loads(base64.urlsafe_b64decode(p + "=" * pad))
+                    token_exp = int(payload.get("exp") or 0)
+            except Exception:
+                pass
+        d["token_exp"] = token_exp
+        if token_exp > now:
+            d["token_status"] = "valid"
+            d["token_expires_in_days"] = round((token_exp - now) / 86400, 1)
+        elif token_exp > 0:
+            d["token_status"] = "expired"
+            d["token_expires_in_days"] = 0
+        else:
+            d["token_status"] = "none"
+            d["token_expires_in_days"] = 0
         rows.append(d)
     return rows
 

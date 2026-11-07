@@ -37,6 +37,11 @@ export const checkPlus = (emails, proxy = '') =>
 export const exportToPanel = (email, targets) =>
   http.post('/api/registered/export_to_panel', { email, targets })
 
+// ──────────────── Token 刷新与 ChatGPT2API 同步 ────────────────
+export const startRefreshToken = (payload) => http.post('/api/registered/refresh_token', payload)
+export const getRefreshTokenStatus = () => http.get('/api/registered/refresh_token/status')
+export const stopRefreshToken = () => http.post('/api/registered/refresh_token/stop')
+
 // ──────────────── 自动跑号 auto-loop ────────────────
 export const autoStart = (payload) => http.post('/api/auto/start', payload)
 export const autoPause = () => http.post('/api/auto/pause')

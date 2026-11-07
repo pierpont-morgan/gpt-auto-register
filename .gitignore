@@ -21,6 +21,13 @@ account_*.json
 mail.txt
 accounts.txt
 outlook_accounts.txt
+icloud_accounts.txt
+number.txt
+*.txt
+
+# 本地批处理与私有辅助脚本
+import_icloud.py
+*.bat
 
 # ──────────────── Python ────────────────
 __pycache__/

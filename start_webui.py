@@ -17,6 +17,8 @@ from pathlib import Path
 # Windows 控制台 GBK 编码兼容：强制 UTF-8 输出
 if sys.platform.startswith("win"):
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
+    os.environ.setdefault("no_proxy", "localhost,127.0.0.1,::1")
     try:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")

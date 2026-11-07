@@ -24,10 +24,10 @@ _SAFARI_VERSIONS = [
         "macos_versions": ["10_15_7"],  # Apple 从 macOS 11 起冻结 UA 中的版本号
     },
     {
-        "impersonate": "safari260",
-        "safari_ver": "26.0",
+        "impersonate": "safari17_0",
+        "safari_ver": "17.0",
         "webkit_ver": "605.1.15",
-        "macos_versions": ["10_15_7"],  # macOS Tahoe，UA 仍冻结为 10_15_7
+        "macos_versions": ["10_15_7"],
     },
 ]
 
@@ -56,10 +56,10 @@ _IOS_SAFARI_VERSIONS = [
         "ios_versions": ["18_4", "18_4_1"],
     },
     {
-        "impersonate": "safari260_ios",
-        "safari_ver": "26.0",
+        "impersonate": "safari17_2_ios",
+        "safari_ver": "17.2",
         "webkit_ver": "605.1.15",
-        "ios_versions": ["26_0", "26_1"],
+        "ios_versions": ["17_2", "17_3"],
     },
 ]
 

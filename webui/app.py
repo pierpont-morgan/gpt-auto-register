@@ -54,7 +54,7 @@ logger = logging.getLogger("webui")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-app = FastAPI(title="GPT Outlook Register WebUI", docs_url=None, redoc_url=None)
+app = FastAPI(title="GPT Register WebUI", docs_url=None, redoc_url=None)
 
 
 # ──────────────────────── Pydantic 模型 ────────────────────────
@@ -448,6 +448,36 @@ def api_export_registered(req: ExportRegisteredReq):
         return {**base, "b64": base64.b64encode(blob).decode("ascii"), "size": len(blob)}
 
     return {**base, "text": export_formats.render_text(rows, fmt)}
+
+
+# ──────────────────────── 账号 Token 刷新与号池同步 ────────────────────────
+
+
+class TokenRefreshReq(BaseModel):
+    emails: Optional[list[str]] = Field(None, description="要刷新的 email 列表；留空表示全部")
+    only_expired: bool = Field(True, description="是否仅刷新已过期的账号")
+
+
+@app.post("/api/registered/refresh_token")
+def api_refresh_token(req: TokenRefreshReq):
+    from webui.token_refresh_service import refresh_manager
+    ok, msg = refresh_manager.start_refresh(emails=req.emails, only_expired=req.only_expired)
+    if not ok:
+        raise HTTPException(400, msg)
+    return {"ok": True, "message": msg}
+
+
+@app.get("/api/registered/refresh_token/status")
+def api_refresh_token_status():
+    from webui.token_refresh_service import refresh_manager
+    return {"ok": True, "data": refresh_manager.get_status()}
+
+
+@app.post("/api/registered/refresh_token/stop")
+def api_refresh_token_stop():
+    from webui.token_refresh_service import refresh_manager
+    refresh_manager.stop()
+    return {"ok": True}
 
 
 # ──────────────────────── 邮箱来源配置 ────────────────────────

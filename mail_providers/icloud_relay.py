@@ -752,6 +752,21 @@ class ICloudRelayProvider(MailProvider):
 
     # ──────────────────────── HTTP ────────────────────────
 
+    @staticmethod
+    def _is_local_host(host: str) -> bool:
+        hostname = (host or "").split(":")[0].strip().lower()
+        return hostname in ("127.0.0.1", "localhost", "::1") or hostname.startswith("127.")
+
+    def _open(self, req: urllib.request.Request):
+        """发请求时按目标区分代理：本地中转（如 127.0.0.1:4173）强制直连，防 Clash 报 502。"""
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        host = urllib.parse.urlsplit(url).netloc
+        if self._is_local_host(host):
+            direct_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            return direct_opener.open(req, timeout=self.http_timeout)
+        return urllib.request.urlopen(req, timeout=self.http_timeout)
+
+
     def _fetch(self) -> str:
         """拉中转页 HTML。
 
@@ -775,7 +790,7 @@ class ICloudRelayProvider(MailProvider):
             "Cache-Control": "no-cache",
         })
         try:
-            with urllib.request.urlopen(req, timeout=self.http_timeout) as r:
+            with self._open(req) as r:
                 return r.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as e:
             # 401/403/404 → token 失效或链接写错，是配置问题，号本身没救
@@ -801,7 +816,7 @@ class ICloudRelayProvider(MailProvider):
             "Accept": "*/*",
             "Referer": self.relay_url,
         })
-        with urllib.request.urlopen(req, timeout=self.http_timeout) as r:
+        with self._open(req) as r:
             return r.read().decode("utf-8", errors="replace")
 
     def _try_api(self, api_url: str, limit: int = 50) -> str:
@@ -853,7 +868,7 @@ class ICloudRelayProvider(MailProvider):
         for url, hdr, body in attempts:
             try:
                 req = urllib.request.Request(url, data=body, headers=hdr)
-                with urllib.request.urlopen(req, timeout=self.http_timeout) as r:
+                with self._open(req) as r:
                     txt = r.read().decode("utf-8", errors="replace")
                 if txt.strip():
                     return txt

@@ -1567,6 +1567,8 @@ class AuthFlow:
         )
         return True
 
+    rotate_impersonate = _rotate_impersonate_session
+
     @staticmethod
     def _datadog_trace_headers() -> dict:
         """生成 Datadog RUM 追踪头（对齐 gptfree-register 格式）。"""
@@ -1731,14 +1733,14 @@ class AuthFlow:
 
         for attempt in range(4):
             if attempt:
-                # 只换出口 IP（新 session = 新出口），指纹保持不变：
-                # 403 是缺 client hints 导致的，已在头里修好，不是指纹的锅。
                 time.sleep(3 + attempt * 2)
-                self.session = create_http_session(
-                    proxy=self.config.proxy,
-                    impersonate=self._impersonate_candidates[self._impersonate_idx],
-                    user_agent=self._ua,
-                )
+                if not self._rotate_impersonate_session():
+                    self.session = create_http_session(
+                        proxy=self.config.proxy,
+                        impersonate=self._impersonate_candidates[self._impersonate_idx],
+                        user_agent=self._ua,
+                    )
+                headers = self._navigation_headers()
             try:
                 resp = self.session.get(
                     "https://chatgpt.com", headers=headers, timeout=40,
@@ -3683,12 +3685,16 @@ class AuthFlow:
                 if normalized and normalized != final_url:
                     callback_url, final_url = self.follow_redirect_chain(normalized)
 
+        if (not refresh_only_mode) and callback_url:
+            self._consume_callback_for_session(callback_url)
+
         if not refresh_only_mode:
             self.get_auth_session()
 
         if callback_url or continue_url:
             self.fetch_client_auth_session_dump("pre_oauth_exchange_protocol")
-            self.oauth_token_exchange(callback_url or "", continue_url or "")
+            if self._env_flag("OAUTH_TOKEN_EXCHANGE_FROM_CALLBACK", "0"):
+                self.oauth_token_exchange(callback_url or "", continue_url or "")
             if (not self.result.refresh_token) and self._env_flag("OAUTH_CODEX_RT_EXCHANGE", "1"):
                 self.oauth_codex_rt_exchange(mail_provider=mail_provider)
             if (not self.result.refresh_token) and self._env_flag("OAUTH_SECONDARY_AUTHORIZE_EXCHANGE", "0"):
